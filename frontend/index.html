@@ -1,79 +1,205 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Health Monitor</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HealthIT Monitor</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <h1>HealthIT Dashboard</h1>
+    <main class="app-shell">
+        <aside class="sidebar">
+            <div class="brand-block">
+                <p class="eyebrow">HealthIT</p>
+                <h1>Monitor</h1>
+                <p id="fleet-summary">Loading inventory...</p>
+            </div>
 
-    <div>
-        <h2>CPU</h2>
-        <p id="cpu-percent">Loading...</p>
-        <p id="cpu-status">Loading...</p>
-    </div>
+            <div class="sidebar-controls">
+                <input id="machine-search" type="search" placeholder="Search machines">
+                <button id="refresh-button" type="button">Refresh</button>
+                <button id="reset-layout-button" type="button">Reset Layout</button>
+                <button id="add-custom-panel-button" type="button">Add Box</button>
+            </div>
 
-    <div>
-        <h2>Memory</h2>
-        <p id="memory-percent">Loading...</p>
-        <p id="memory-status">Loading...</p>
-    </div>
+            <div class="filter-row" aria-label="Machine filters">
+                <button class="filter-button active" type="button" data-filter="all">All</button>
+                <button class="filter-button" type="button" data-filter="local">Local</button>
+                <button class="filter-button" type="button" data-filter="connected">Connected</button>
+                <button class="filter-button" type="button" data-filter="offline">Offline</button>
+            </div>
 
-    <div>
-        <h2>Disk</h2>
-        <p id="disk-percent">Loading...</p>
-        <p id="disk-status">Loading...</p>
-    </div>
+            <section class="connect-panel">
+                <div class="section-heading">
+                    <h2>Add Machine</h2>
+                    <span>agent</span>
+                </div>
+                <form id="add-machine-form">
+                    <input id="new-machine-name" type="text" placeholder="Name, e.g. Lab Node 01" required>
+                    <input id="new-machine-host" type="text" placeholder="Host or IP for SSH deploy">
+                    <input id="new-machine-controller-url" type="url" placeholder="Controller URL, e.g. http://192.168.0.164:8000">
+                    <select id="new-machine-login-type" aria-label="SSH login type">
+                        <option value="password">SSH Password</option>
+                        <option value="key">SSH Key</option>
+                    </select>
+                    <div class="deploy-row">
+                        <input id="new-machine-ssh-user" type="text" placeholder="SSH user" value="pi">
+                        <input id="new-machine-ssh-port" type="number" min="1" max="65535" value="22" aria-label="SSH port">
+                    </div>
+                    <input id="new-machine-ssh-password" type="password" placeholder="SSH password">
+                    <input id="new-machine-tags" type="text" placeholder="Tags, comma separated">
+                    <button type="submit">Deploy</button>
+                </form>
+                <div id="deploy-progress" class="deploy-progress" hidden>
+                    <div><span id="deploy-progress-label">Preparing</span><strong id="deploy-progress-value">0%</strong></div>
+                    <progress id="deploy-progress-bar" max="100" value="0"></progress>
+                    <ol id="deploy-step-list" class="deploy-step-list"></ol>
+                    <details id="deploy-details" class="deploy-details" hidden>
+                        <summary>Technical details</summary>
+                        <pre id="deploy-details-output"></pre>
+                    </details>
+                    <button id="retry-deploy-button" type="button" hidden>Retry Deploy</button>
+                </div>
+                <pre id="connect-command" class="connect-command">Add a machine to generate an agent command.</pre>
+            </section>
 
-    <div>
-        <h2>Network</h2>
-        <p id="network-sent">Loading...</p>
-        <p id="network-recv">Loading...</p>
-        <p id="network-status">Loading...</p>
-    </div>
+            <section>
+                <div class="section-heading">
+                    <h2>Machines</h2>
+                    <span id="machine-count">0</span>
+                </div>
+                <div id="machine-list" class="machine-list"></div>
+            </section>
+        </aside>
 
-    <!-- ========================= -->
-    <!-- SYSTEM INFO (NEW) -->
-    <!-- ========================= -->
-    <div>
-        <h2>System Info</h2>
-        <p id="hostname">Loading...</p>
-        <p id="os-info">Loading...</p>
-        <p id="uptime">Loading...</p>
-        <p id="ip-address">Loading...</p>
-        <p id="mac-address">Loading...</p>
-    </div>
+        <section class="dashboard">
+            <header class="dashboard-header">
+                <div>
+                    <p id="selected-source" class="eyebrow">No machine</p>
+                    <h2 id="selected-name">Select a machine</h2>
+                    <p id="selected-meta">Waiting for telemetry.</p>
+                </div>
+                <div class="header-status">
+                    <div id="status-badge" class="status-badge">Unknown</div>
+                    <p id="last-updated" class="last-updated">Last updated: --</p>
+                </div>
+            </header>
 
-    <!-- ========================= -->
-    <!-- HARDWARE (NEW) -->
-    <!-- ========================= -->
-    <div>
-        <h2>Hardware</h2>
-        <p id="cpu-model">Loading...</p>
-        <p id="ram-total">Loading...</p>
-        <p id="temperature">Loading...</p>
-    </div>
+            <section class="metric-grid" aria-label="Primary metrics">
+                <article class="metric-card dashboard-box" data-panel-id="cpu" data-metric="cpu">
+                    <div class="metric-top"><span>CPU</span><strong id="cpu-value">--%</strong></div>
+                    <div class="meter"><span id="cpu-meter"></span></div>
+                    <p id="cpu-note">--</p>
+                    <canvas id="cpu-chart" class="sparkline" width="340" height="96"></canvas>
+                </article>
+                <article class="metric-card dashboard-box" data-panel-id="memory" data-metric="memory">
+                    <div class="metric-top"><span>Memory</span><strong id="memory-value">--%</strong></div>
+                    <div class="meter"><span id="memory-meter"></span></div>
+                    <p id="memory-note">--</p>
+                    <canvas id="memory-chart" class="sparkline" width="340" height="96"></canvas>
+                </article>
+                <article class="metric-card dashboard-box" data-panel-id="disk" data-metric="disk">
+                    <div class="metric-top"><span>Disk</span><strong id="disk-value">--%</strong></div>
+                    <div class="meter"><span id="disk-meter"></span></div>
+                    <p id="disk-note">--</p>
+                    <canvas id="disk-chart" class="sparkline" width="340" height="96"></canvas>
+                </article>
+                <article class="metric-card dashboard-box" data-panel-id="network">
+                    <div class="metric-top"><span>Network</span><strong id="network-rate">--</strong></div>
+                    <p id="network-volume">--</p>
+                    <div id="network-mini" class="mini-list"></div>
+                </article>
+            </section>
 
-    <!-- ========================= -->
-    <!-- OVERALL STATUS (NEW) -->
-    <!-- ========================= -->
-    <div>
-        <h2>Overall Status</h2>
-        <p id="overall-status">Loading...</p>
-    </div>
+            <section class="panel-grid">
+                <article class="panel dashboard-box" data-panel-id="system">
+                    <div class="section-heading"><h2>System</h2><span id="connection-status">--</span></div>
+                    <dl id="system-details" class="details-list"></dl>
+                </article>
+                <article class="panel dashboard-box" data-panel-id="hardware">
+                    <div class="section-heading"><h2>Hardware</h2><span id="last-seen">--</span></div>
+                    <dl id="hardware-details" class="details-list"></dl>
+                </article>
+                <article class="panel dashboard-box" data-panel-id="alerts">
+                    <div class="section-heading"><h2>Alerts</h2><span id="alert-count">0</span></div>
+                    <ul id="alerts" class="alerts-list"></ul>
+                </article>
+            </section>
 
-    <!-- ========================= -->
-    <!-- ALERTS (NEW) -->
-    <!-- ========================= -->
-    <div>
-        <h2>Alerts</h2>
-        <ul id="alerts">
-            <li>Loading...</li>
-        </ul>
-    </div>
+            <section class="deep-grid">
+                <article class="panel wide dashboard-box" data-panel-id="cores">
+                    <div class="section-heading"><h2>CPU Cores</h2><span id="cpu-frequency">--</span></div>
+                    <div id="core-grid" class="bar-grid"></div>
+                </article>
+                <article class="panel dashboard-box" data-panel-id="memory-detail">
+                    <div class="section-heading"><h2>Memory</h2><span id="swap-summary">--</span></div>
+                    <dl id="memory-details" class="details-list"></dl>
+                </article>
+                <article class="panel wide dashboard-box" data-panel-id="storage">
+                    <div class="section-heading"><h2>Storage</h2><span id="storage-io">--</span></div>
+                    <div id="storage-list" class="table-list"></div>
+                </article>
+                <article class="panel wide dashboard-box" data-panel-id="interfaces">
+                    <div class="section-heading"><h2>Network Interfaces</h2><span id="interface-count">--</span></div>
+                    <div id="interface-list" class="table-list"></div>
+                </article>
+                <article class="panel wide dashboard-box" data-panel-id="process-cpu">
+                    <div class="section-heading"><h2>Top CPU Processes</h2><span id="process-count">--</span></div>
+                    <div id="process-cpu-list" class="table-list"></div>
+                </article>
+                <article class="panel wide dashboard-box" data-panel-id="process-memory">
+                    <div class="section-heading"><h2>Top Memory Processes</h2><span>memory</span></div>
+                    <div id="process-memory-list" class="table-list"></div>
+                </article>
+                <article class="panel dashboard-box" data-panel-id="power">
+                    <div class="section-heading"><h2>Power</h2><span id="power-summary">--</span></div>
+                    <dl id="power-details" class="details-list"></dl>
+                </article>
+                <article class="panel dashboard-box" data-panel-id="users">
+                    <div class="section-heading"><h2>Users</h2><span id="user-count">--</span></div>
+                    <div id="user-list" class="table-list"></div>
+                </article>
+            </section>
+
+            <section class="terminal-panel dashboard-box" data-panel-id="terminal">
+                <div class="section-heading">
+                    <div><h2>Local Terminal</h2></div>
+                    <span id="terminal-state">local</span>
+                </div>
+                <div class="terminal-tabs-row">
+                    <div id="terminal-tabs" class="terminal-tabs" aria-label="Terminal sessions"></div>
+                    <button id="new-terminal-button" type="button">+</button>
+                </div>
+                <div class="terminal-actions">
+                    <button id="rename-terminal-button" type="button">Rename</button>
+                    <button id="delete-terminal-button" type="button">Delete</button>
+                    <button id="split-terminal-button" type="button">Split</button>
+                    <button id="focus-terminal-button" type="button">Focus</button>
+                </div>
+                <div id="terminal-workspace" class="terminal-workspace" aria-live="polite"></div>
+            </section>
+
+            <footer class="dashboard-footer">HealthIT Homelab Monitor</footer>
+        </section>
+    </main>
+
+    <dialog id="custom-panel-dialog" class="custom-panel-dialog">
+        <form id="custom-panel-form" method="dialog">
+            <div class="section-heading">
+                <h2>Custom Box</h2>
+                <span>HTML/Text</span>
+            </div>
+            <input id="custom-panel-title" type="text" placeholder="Box title" required>
+            <textarea id="custom-panel-code" rows="10" placeholder="<p>Your content here</p>"></textarea>
+            <div class="dialog-actions">
+                <button id="cancel-custom-panel-button" type="button">Cancel</button>
+                <button type="submit">Save</button>
+            </div>
+        </form>
+    </dialog>
 
     <script src="script.js"></script>
-
 </body>
 </html>

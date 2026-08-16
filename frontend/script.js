@@ -1,5 +1,6 @@
 const API_BASE = window.location.protocol.startsWith("http") ? window.location.origin : "http://127.0.0.1:8000";
 
+// One shared state object keeps the dashboard simple while this is still vanilla JS.
 const state = {
     machines: [],
     selectedKey: null,
@@ -8,6 +9,7 @@ const state = {
     panelLayout: JSON.parse(localStorage.getItem("healthit.panelLayout") || "{}"),
     customPanels: JSON.parse(localStorage.getItem("healthit.customPanels") || "[]"),
     panelOverrides: JSON.parse(localStorage.getItem("healthit.panelOverrides") || "{}"),
+    maskSensitive: localStorage.getItem("healthit.maskSensitive") === "true",
     editingCustomPanelId: null,
     editingBuiltInPanelId: null,
     history: new Map(),
@@ -24,6 +26,7 @@ const els = {
     toast: document.getElementById("toast"),
     machineSearch: document.getElementById("machine-search"),
     refreshButton: document.getElementById("refresh-button"),
+    maskInfoButton: document.getElementById("mask-info-button"),
     resetLayoutButton: document.getElementById("reset-layout-button"),
     addCustomPanelButton: document.getElementById("add-custom-panel-button"),
     addMachineForm: document.getElementById("add-machine-form"),
@@ -88,6 +91,7 @@ const els = {
     focusTerminalButton: document.getElementById("focus-terminal-button"),
 };
 
+// Small toast helper for user-facing feedback without blocking the page.
 function showToast(message, type = "info") {
     els.toast.textContent = message;
     els.toast.dataset.type = type;
@@ -140,6 +144,7 @@ const DEPLOY_STEPS = [
     "Verifying heartbeat",
 ];
 
+// Render the deploy checklist so failures show exactly where the SSH flow stopped.
 function renderDeploySteps(steps = [], failed = false) {
     const byLabel = new Map(steps.map((step) => [step.label, step]));
     els.deployStepList.innerHTML = DEPLOY_STEPS.map((label) => {
@@ -214,6 +219,39 @@ function valueAt(obj, path, fallback = "--") {
 
 function machineName(machine) {
     return machine.display_name || valueAt(machine, "identity.hostname", "Unknown");
+}
+
+function displayMachineName(machine) {
+    if (!state.maskSensitive) return machineName(machine);
+    if (machine.source === "local") return "Local Workstation";
+    return machine.source === "registered" ? "Pending Node" : "Lab Node";
+}
+
+function maskHost(value) {
+    if (!state.maskSensitive) return value;
+    if (!value || value === "--") return value;
+    return "masked-host";
+}
+
+function maskIpList(value) {
+    if (!state.maskSensitive) return value;
+    if (!value || value === "--") return value;
+    return "10.0.0.x";
+}
+
+function maskPath(value) {
+    if (!state.maskSensitive) return value;
+    return String(value || "").replace(/C:\\Users\\[^\\]+/gi, "C:\\Users\\demo").replace(/\/home\/[^/]+/gi, "/home/demo");
+}
+
+function safeDetail(label, value) {
+    const lower = label.toLowerCase();
+    if (!state.maskSensitive) return value;
+    if (["host", "device"].includes(lower)) return "masked-host";
+    if (lower === "user") return "demo";
+    if (lower === "ip") return "10.0.0.x";
+    if (lower === "mac") return "AA-BB-CC-XX-XX-XX";
+    return value;
 }
 
 function machineKey(machine) {
@@ -294,6 +332,7 @@ function setMeter(id, value) {
 }
 
 function remember(machine) {
+    // Keep a short in-browser trend history for the mini charts.
     if (!machine.cpu) return;
     const key = machineKey(machine);
     const history = state.history.get(key) || { cpu: [], memory: [], disk: [] };
@@ -305,6 +344,7 @@ function remember(machine) {
 }
 
 function drawSparkline(canvasId, values, color) {
+    // Tiny canvas chart with fixed 0-100 markers so usage is easy to read.
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -385,6 +425,7 @@ function filteredMachines() {
 }
 
 function renderMachines() {
+    // Sidebar machine list: local, pending, failed, and remote machines all live here.
     const machines = filteredMachines();
     els.machineCount.textContent = machines.length;
     els.machineList.innerHTML = "";
@@ -401,7 +442,7 @@ function renderMachines() {
         button.innerHTML = `
             <span class="signal-dot ${status}"></span>
             <span>
-                <span class="machine-name">${machineName(machine)}</span>
+                <span class="machine-name">${escapeHtml(displayMachineName(machine))}</span>
                 <span class="machine-meta">${machine.source || "node"} / ${machine.connection_status || status} / ${formatAge(machine.age_seconds)}</span>
             </span>
             <span class="machine-actions">
@@ -468,7 +509,7 @@ async function deleteMachine(machine) {
 }
 
 function renderDetails(target, rows) {
-    target.innerHTML = rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(cleanValue(value))}</dd></div>`).join("");
+    target.innerHTML = rows.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(cleanValue(safeDetail(label, value)))}</dd></div>`).join("");
 }
 
 function renderList(target, rows, empty = "No data") {
@@ -476,6 +517,7 @@ function renderList(target, rows, empty = "No data") {
 }
 
 function renderSelected(machine) {
+    // Main dashboard render for whichever machine is selected in the sidebar.
     if (!machine) {
         els.selectedSource.textContent = "Inventory";
         els.selectedName.textContent = "No machines connected";
@@ -491,7 +533,7 @@ function renderSelected(machine) {
     const alerts = machine.alerts || [];
 
     els.selectedSource.textContent = `${machine.source || "node"} / ${machine.connection_status || status}`;
-    els.selectedName.textContent = machineName(machine);
+    els.selectedName.textContent = displayMachineName(machine);
     els.selectedMeta.textContent = [
         `${identity.os_type || ""} ${identity.os_release || ""}`.trim(),
         machine.connection_status || status,
@@ -602,10 +644,10 @@ function renderInterfaces(machine) {
     els.interfaceCount.textContent = interfaces.length;
     const rows = interfaces.map((iface) => `
         <div class="table-row">
-            <span>${escapeHtml(iface.name || "Interface")}</span>
+            <span>${escapeHtml(state.maskSensitive ? "Interface" : iface.name || "Interface")}</span>
             <span>${iface.is_up ? "up" : "down"}</span>
             <span>${iface.speed_mbps || "--"} Mbps</span>
-            <span>${escapeHtml(cleanValue((iface.addresses || []).map((addr) => addr.address).slice(0, 2).join(", ")))}</span>
+            <span>${escapeHtml(cleanValue(maskIpList((iface.addresses || []).map((addr) => addr.address).slice(0, 2).join(", "))))}</span>
         </div>
     `);
     renderList(els.interfaceList, rows, "No interface telemetry.");
@@ -645,9 +687,9 @@ function renderUsers(machine) {
     els.userCount.textContent = users.length;
     renderList(els.userList, users.map((user) => `
         <div class="table-row">
-            <span>${escapeHtml(cleanValue(user.name))}</span>
+            <span>${escapeHtml(cleanValue(state.maskSensitive ? "demo" : user.name))}</span>
             <span>${escapeHtml(cleanValue(user.terminal))}</span>
-            <span>${escapeHtml(cleanValue(user.host))}</span>
+            <span>${escapeHtml(cleanValue(maskHost(user.host)))}</span>
             <span>${escapeHtml(formatDateTime(user.started))}</span>
         </div>
     `), "No user sessions.");
@@ -663,6 +705,11 @@ function render() {
     applyPanelOverrides();
 }
 
+function syncMaskButton() {
+    els.maskInfoButton.classList.toggle("active", state.maskSensitive);
+    els.maskInfoButton.textContent = state.maskSensitive ? "Info Masked" : "Mask Info";
+}
+
 async function fetchMachines() {
     const response = await fetch(`${API_BASE}/machines`);
     if (!response.ok) throw new Error(`API returned ${response.status}`);
@@ -673,6 +720,7 @@ async function fetchMachines() {
 }
 
 async function registerMachine(event) {
+    // Add Machine can either register a placeholder or run the full SSH deploy flow.
     event.preventDefault();
     const submitButton = els.addMachineForm.querySelector("button[type='submit']");
     submitButton.disabled = true;
@@ -765,6 +813,7 @@ function savePanelLayout() {
 }
 
 function setupPanelControls() {
+    // Adds small edit/move controls to dashboard boxes and restores saved layout tweaks.
     document.querySelectorAll(".dashboard-box").forEach((box, index) => {
         const id = box.dataset.panelId;
         const saved = state.panelLayout[id] || {};
@@ -842,6 +891,7 @@ function moveOrHidePanel(box, tool) {
 }
 
 function startPanelFreeDrag(event, box) {
+    // Free-drag mode lets panels float anywhere inside the dashboard area.
     event.preventDefault();
     event.stopPropagation();
 
@@ -956,6 +1006,7 @@ function resetPanelLayout() {
 }
 
 function renderCustomPanels() {
+    // Custom boxes are local-only experiments saved in the browser.
     const target = document.querySelector(".deep-grid");
     document.querySelectorAll("[data-custom-panel-id]").forEach((panel) => panel.remove());
     state.customPanels.forEach((panel) => {
@@ -979,6 +1030,7 @@ function editablePanelHtml(box) {
 }
 
 function applyPanelOverrides() {
+    // Built-in panel edits are also local-only and can be reset from the sidebar.
     Object.entries(state.panelOverrides).forEach(([panelId, override]) => {
         const box = document.querySelector(`[data-panel-id="${CSS.escape(panelId)}"]`);
         if (!box) return;
@@ -1065,6 +1117,7 @@ function renderTerminalTabs() {
 }
 
 function renderTerminal() {
+    // Terminal panes are normal local sessions, with optional split-screen viewing.
     renderTerminalTabs();
     els.terminalWorkspace.innerHTML = "";
     const visibleSessions = state.visibleTerminalIds
@@ -1084,7 +1137,7 @@ function renderTerminal() {
         });
         const title = document.createElement("div");
         title.className = "terminal-pane-title";
-        title.textContent = `${session.name} / ${session.cwd}`;
+        title.textContent = `${session.name} / ${maskPath(session.cwd)}`;
         pane.appendChild(title);
         const outputArea = document.createElement("div");
         outputArea.className = "terminal-output";
@@ -1094,18 +1147,18 @@ function renderTerminal() {
             if (entry.command) {
                 const command = document.createElement("div");
                 command.className = "terminal-line command";
-                command.textContent = `${entry.cwd}> ${entry.command}`;
+                command.textContent = `${maskPath(entry.cwd)}> ${entry.command}`;
                 block.appendChild(command);
             } else if (!entry.output) {
                 const command = document.createElement("div");
                 command.className = "terminal-line command blank";
-                command.textContent = `${entry.cwd}>`;
+                command.textContent = `${maskPath(entry.cwd)}>`;
                 block.appendChild(command);
             }
             if (entry.output) {
                 const output = document.createElement("pre");
                 output.className = entry.exit_code === 0 ? "terminal-line output" : "terminal-line error";
-                output.textContent = entry.output;
+                output.textContent = maskPath(entry.output);
                 block.appendChild(output);
             }
             outputArea.appendChild(block);
@@ -1125,7 +1178,7 @@ function renderTerminal() {
 function buildPromptForm(session) {
     const form = document.createElement("form");
     form.className = "terminal-inline-form";
-    form.innerHTML = `<span class="terminal-prompt">${session.cwd}&gt;</span><input class="terminal-input" type="text" autocomplete="off" spellcheck="false" placeholder="ssh user@host">`;
+    form.innerHTML = `<span class="terminal-prompt">${maskPath(session.cwd)}&gt;</span><input class="terminal-input" type="text" autocomplete="off" spellcheck="false" placeholder="ssh user@host">`;
     form.addEventListener("submit", (event) => {
         event.preventDefault();
         const input = form.querySelector("input");
@@ -1235,12 +1288,21 @@ async function runTerminalCommand(command) {
 }
 
 async function boot() {
+    // Start the dashboard: wire events, load deploy defaults, then poll machines.
     renderCustomPanels();
     setupPanelControls();
     applyPanelOverrides();
     syncLoginTypeFields();
     await loadDeployInfo();
+    syncMaskButton();
     els.refreshButton.addEventListener("click", fetchMachines);
+    els.maskInfoButton.addEventListener("click", () => {
+        state.maskSensitive = !state.maskSensitive;
+        localStorage.setItem("healthit.maskSensitive", String(state.maskSensitive));
+        syncMaskButton();
+        render();
+        renderTerminal();
+    });
     els.resetLayoutButton.addEventListener("click", resetPanelLayout);
     els.addCustomPanelButton.addEventListener("click", () => openCustomPanelDialog());
     els.customPanelForm.addEventListener("submit", saveCustomPanel);

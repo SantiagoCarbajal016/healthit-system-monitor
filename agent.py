@@ -14,6 +14,8 @@ from urllib import parse, request
 import psutil
 
 
+# The remote agent only accepts a tiny safe command set from the dashboard.
+# It is telemetry-first, not a full remote shell.
 ALLOWED_TASKS = {
     "help",
     "status",
@@ -60,6 +62,7 @@ def mac_addresses() -> list[dict[str, str]]:
 
 
 def snapshot(display_name: str | None, tags: list[str]) -> dict[str, Any]:
+    """Collect one telemetry payload from the machine running this agent."""
     memory = psutil.virtual_memory()
     disk_path = "/" if platform.system() != "Windows" else "C:\\"
     disk = psutil.disk_usage(disk_path)
@@ -180,6 +183,7 @@ def format_uptime(seconds: int) -> str:
 
 
 def send_snapshot(url: str, payload: dict[str, Any], token: str | None) -> None:
+    """Post the latest telemetry back to the HealthIT dashboard."""
     data = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if token:
@@ -191,6 +195,7 @@ def send_snapshot(url: str, payload: dict[str, Any], token: str | None) -> None:
 
 
 def task_output(command: str, current: dict[str, Any]) -> tuple[str, str]:
+    """Answer simple dashboard tasks using the latest local snapshot."""
     if command not in ALLOWED_TASKS:
         return "rejected", f"Command not allowed: {command}"
 
@@ -250,6 +255,7 @@ def task_output(command: str, current: dict[str, Any]) -> tuple[str, str]:
 
 
 def get_tasks(server: str, machine_key: str, token: str | None) -> list[dict[str, Any]]:
+    """Ask the dashboard if it has any safe queued tasks for this machine."""
     query = parse.urlencode({"machine_key": machine_key})
     headers = {}
     if token:
@@ -280,6 +286,7 @@ def send_task_result(server: str, task: dict[str, Any], machine_key: str, status
 
 
 def main() -> None:
+    """Main loop: send telemetry, check tasks, sleep, repeat."""
     parser = argparse.ArgumentParser(description="Send this computer's telemetry to HealthIT.")
     parser.add_argument("--server", default=os.getenv("HEALTHIT_SERVER", "http://127.0.0.1:8000"))
     parser.add_argument("--interval", type=int, default=int(os.getenv("HEALTHIT_AGENT_INTERVAL", "10")))

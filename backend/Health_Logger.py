@@ -18,14 +18,32 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
+from backend.storage import load_state, save_state
+
 try:
     import paramiko
 except ImportError:  # pragma: no cover - runtime dependency check
     paramiko = None
 
 
+# Basic app settings. Most of these can be changed with env vars while testing.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
+
+
+def load_local_env(path: Path) -> None:
+    """Tiny .env loader so local setup stays simple without another dependency."""
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+load_local_env(PROJECT_ROOT / ".env")
 STALE_AFTER_SECONDS = int(os.getenv("HEALTHIT_STALE_AFTER_SECONDS", "60"))
 TELEMETRY_TOKEN = os.getenv("HEALTHIT_TELEMETRY_TOKEN")
 ENABLE_SSH = os.getenv("HEALTHIT_ENABLE_SSH", "false").lower() == "true"
@@ -63,6 +81,7 @@ app.add_middleware(
 )
 
 
+# API request/response shapes. Keeping these near the top makes the backend easier to scan.
 class TelemetryPayload(BaseModel):
     identity: dict[str, Any] = Field(default_factory=dict)
     hardware: dict[str, Any] = Field(default_factory=dict)
@@ -128,12 +147,19 @@ class MachineUpdate(BaseModel):
     tags: list[str] | None = None
 
 
+# Prototype storage. SQLite saves these dictionaries so the dashboard survives restarts.
 remote_machines: dict[str, dict[str, Any]] = {}
 registered_machines: dict[str, dict[str, Any]] = {}
 machine_overrides: dict[str, dict[str, Any]] = {}
 task_queues: dict[str, list[dict[str, Any]]] = {}
 task_results: dict[str, list[dict[str, Any]]] = {}
 terminal_sessions: dict[str, dict[str, Any]] = {}
+saved_state = load_state()
+remote_machines.update(saved_state["remote_machines"])
+registered_machines.update(saved_state["registered_machines"])
+machine_overrides.update(saved_state["machine_overrides"])
+terminal_sessions.update(saved_state["terminal_sessions"])
+task_results.update(saved_state["task_results"])
 ALLOWED_TASKS = {
     "help",
     "status",
@@ -146,6 +172,17 @@ ALLOWED_TASKS = {
     "network",
     "alerts",
 }
+
+
+def persist_state() -> None:
+    """Save the parts of state that should survive a dashboard restart."""
+    save_state(
+        remote_machines=remote_machines,
+        registered_machines=registered_machines,
+        machine_overrides=machine_overrides,
+        terminal_sessions=terminal_sessions,
+        task_results=task_results,
+    )
 
 
 def format_uptime(seconds: int) -> str:
@@ -217,6 +254,7 @@ def get_mac_addresses() -> list[dict[str, str]]:
 
 
 def get_system_identity() -> dict[str, Any]:
+    """Collect the identity fields that make this machine recognizable."""
     boot_time = psutil.boot_time()
     uptime_seconds = int(dt.datetime.now().timestamp() - boot_time)
 
@@ -454,6 +492,7 @@ def collect_user_sessions() -> list[dict[str, Any]]:
 
 
 def collect_system_metrics() -> dict[str, Any]:
+    """Grab the live values shown in the main metric cards."""
     cpu_percent = psutil.cpu_percent(interval=1)
     per_cpu = psutil.cpu_percent(interval=None, percpu=True)
     cpu_freq = psutil.cpu_freq()
@@ -567,6 +606,7 @@ def classify_packets(count: int, direction: str) -> tuple[str, str]:
 
 
 def build_alerts(identity: dict[str, Any], hardware: dict[str, Any], metrics: dict[str, Any]) -> list[str]:
+    """Turn raw numbers into short dashboard warnings."""
     alerts = []
 
     if metrics["cpu"]["percent"] >= 80:
@@ -635,6 +675,7 @@ def enrich_machine(snapshot: dict[str, Any], source: str) -> dict[str, Any]:
 
 
 def collect_full_snapshot() -> dict[str, Any]:
+    """Build one complete local telemetry snapshot for the dashboard."""
     identity = get_system_identity()
     hardware = get_hardware_info()
     metrics = collect_system_metrics()
@@ -658,6 +699,7 @@ def collect_full_snapshot() -> dict[str, Any]:
 
 
 def build_registered_machine(registration: MachineRegistration) -> dict[str, Any]:
+    """Create a pending machine row before the agent starts reporting."""
     machine_key = f"manual-{uuid.uuid4()}"
     return {
         "machine_key": machine_key,
@@ -692,6 +734,7 @@ def local_lan_ip() -> str:
 
 
 def dashboard_agent_url(request: Request) -> str:
+    """Pick the callback URL that remote agents should send telemetry to."""
     public_url = os.getenv("HEALTHIT_PUBLIC_URL")
     if public_url:
         return public_url.rstrip("/")
@@ -711,6 +754,7 @@ def deploy_step(
     stderr: str = "",
     exit_code: int | None = None,
 ) -> dict[str, Any]:
+    """Status object used by the frontend deploy progress list."""
     return {
         "label": label,
         "status": status,
@@ -734,6 +778,7 @@ def deploy_failure(label: str, command: str, stdout: str, stderr: str, exit_code
 
 
 def run_deploy_step(label: str, command: list[str], timeout: int = 45) -> dict[str, Any]:
+    """Run one SSH-key deploy command and capture useful output if it fails."""
     logger.info("SSH deploy step: %s", label)
     command_text = " ".join(shlex.quote(part) for part in command)
     try:
@@ -840,6 +885,7 @@ def run_paramiko_command(client: Any, label: str, command: str, timeout: int = 4
 
 
 def connect_paramiko(deploy: SshDeployRequest) -> Any:
+    """Open password-based SSH without saving or logging the password."""
     ensure_paramiko_available()
     if not deploy.ssh_password:
         raise HTTPException(status_code=400, detail="Password SSH deploy requires a password.")
@@ -886,6 +932,7 @@ def deploy_matches_snapshot(deploy: SshDeployRequest, snapshot: dict[str, Any]) 
 
 
 def wait_for_agent_heartbeat(deploy: SshDeployRequest, timeout: int = 25) -> dict[str, Any]:
+    """After starting the remote agent, wait until telemetry reaches this server."""
     command = "wait for POST /telemetry"
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -918,6 +965,7 @@ def append_failed_step(exc: HTTPException, steps: list[dict[str, Any]]) -> HTTPE
 
 
 def remote_start_script(remote_dir: str, server_url: str, display_name: str) -> str:
+    """Build the remote command that keeps the agent running in the background."""
     return (
         f"cd {remote_dir} && "
         "if [ -f agent.pid ]; then oldpid=$(cat agent.pid 2>/dev/null || true); "
@@ -935,6 +983,7 @@ def remote_start_script(remote_dir: str, server_url: str, display_name: str) -> 
 
 
 def deploy_agent_with_password(deploy: SshDeployRequest, request: Request) -> dict[str, Any]:
+    """Deploy the agent through Paramiko when the dashboard user enters a password."""
     server_url = deploy_controller_url(deploy, request)
     remote_dir = "healthit-agent"
     agent_path = PROJECT_ROOT / "agent.py"
@@ -989,6 +1038,7 @@ def deploy_agent_with_password(deploy: SshDeployRequest, request: Request) -> di
 
 
 def deploy_agent_with_key(deploy: SshDeployRequest, request: Request) -> dict[str, Any]:
+    """Deploy the agent with normal ssh/scp when SSH keys are already set up."""
     server_url = deploy_controller_url(deploy, request)
     remote_dir = "~/healthit-agent"
     agent_path = PROJECT_ROOT / "agent.py"
@@ -1108,6 +1158,7 @@ def find_pending_registration(snapshot: dict[str, Any]) -> tuple[str, dict[str, 
 
 
 def apply_machine_override(machine: dict[str, Any]) -> dict[str, Any]:
+    """Apply friendly names/tags without changing the raw telemetry payload."""
     key = machine.get("machine_key") or normalize_machine_id(machine)
     override = machine_overrides.get(key, {})
     if not override:
@@ -1219,6 +1270,7 @@ def queue_remote_task(machine_key: str, command: str) -> dict[str, Any]:
     }
     task_queues.setdefault(machine_key, []).append(task)
     task_results.setdefault(machine_key, []).append(task)
+    persist_state()
     return task
 
 
@@ -1293,6 +1345,7 @@ def run_ssh_task(machine_key: str, command: str) -> dict[str, Any]:
         "mode": "ssh",
     }
     task_results.setdefault(machine_key, []).append(task)
+    persist_state()
     return task
 
 
@@ -1337,6 +1390,7 @@ def create_terminal_session(name: str | None = None, machine_key: str | None = N
         ],
     }
     terminal_sessions[session_id] = session
+    persist_state()
     return session
 
 
@@ -1353,6 +1407,11 @@ def terminal_summary(session: dict[str, Any]) -> dict[str, Any]:
 
 
 def run_terminal_command(session_id: str, command: str) -> dict[str, Any]:
+    """Run one command in the local browser terminal.
+
+    This is intentionally a trusted-homelab feature for now. Add auth before
+    exposing the dashboard outside your own network.
+    """
     if session_id not in terminal_sessions:
         raise HTTPException(status_code=404, detail="Terminal session not found.")
 
@@ -1372,11 +1431,13 @@ def run_terminal_command(session_id: str, command: str) -> dict[str, Any]:
         )
         session["history"] = session["history"][-200:]
         session["updated_at"] = now_iso()
+        persist_state()
         return terminal_summary(session)
 
     if clean_command.lower() in {"cls", "clear"}:
         session["history"] = []
         session["updated_at"] = timestamp
+        persist_state()
         return terminal_summary(session)
 
     if clean_command.lower() in {"pwd", "cd"}:
@@ -1412,6 +1473,7 @@ def run_terminal_command(session_id: str, command: str) -> dict[str, Any]:
     session["history"].append(entry)
     session["history"] = session["history"][-200:]
     session["updated_at"] = now_iso()
+    persist_state()
     return terminal_summary(session)
 
 
@@ -1444,6 +1506,7 @@ def receive_telemetry(
     payload: TelemetryPayload = Body(...),
     x_healthit_token: str | None = Header(default=None),
 ) -> dict[str, str]:
+    """Main endpoint remote agents use to send live machine stats."""
     require_telemetry_token(x_healthit_token)
 
     snapshot = payload.model_dump()
@@ -1459,6 +1522,7 @@ def receive_telemetry(
         registered_machines.pop(pending_key, None)
 
     remote_machines[machine_key] = enrich_machine(snapshot, "remote")
+    persist_state()
 
     logger.info("Telemetry received from %s", machine_key)
     return {"message": "Telemetry received successfully.", "machine_key": machine_key}
@@ -1466,6 +1530,7 @@ def receive_telemetry(
 
 @app.get("/machines")
 def get_all_machines() -> dict[str, Any]:
+    """Return local, remote, and pending machines in one dashboard list."""
     local_snapshot = apply_machine_override(enrich_machine(collect_full_snapshot(), "local"))
     remote_snapshots = [
         apply_machine_override(enrich_machine(machine, "remote"))
@@ -1504,11 +1569,13 @@ def register_machine(registration: MachineRegistration) -> dict[str, Any]:
 
     machine = build_registered_machine(registration)
     registered_machines[machine["machine_key"]] = machine
+    persist_state()
     return {**machine, "already_exists": False, "message": "Machine registered."}
 
 
 @app.post("/machines/deploy-ssh")
 def deploy_machine_agent(deploy: SshDeployRequest, request: Request) -> dict[str, Any]:
+    """Register a machine, deploy its agent over SSH, then wait for heartbeat."""
     registration = MachineRegistration(
         display_name=deploy.display_name,
         host=deploy.host,
@@ -1535,6 +1602,7 @@ def deploy_machine_agent(deploy: SshDeployRequest, request: Request) -> dict[str
             ]
         if isinstance(exc.detail, dict):
             exc.detail["machine"] = registered_machines.get(machine_key, machine)
+        persist_state()
         raise exc
     return {
         **deploy_result,
@@ -1572,6 +1640,7 @@ def update_machine(machine_key: str, update: MachineUpdate) -> dict[str, Any]:
             machine["tags"] = update.tags
         machine["identity"] = identity
         registered_machines[machine_key] = machine
+        persist_state()
         return apply_machine_override(machine)
 
     known_keys = {normalize_machine_id(collect_full_snapshot()), *remote_machines.keys()}
@@ -1585,6 +1654,7 @@ def update_machine(machine_key: str, update: MachineUpdate) -> dict[str, Any]:
         override["host"] = update.host
     if update.tags is not None:
         override["tags"] = update.tags
+    persist_state()
     return get_machine(machine_key)
 
 
@@ -1593,10 +1663,12 @@ def delete_machine(machine_key: str) -> dict[str, str]:
     if machine_key in registered_machines:
         del registered_machines[machine_key]
         machine_overrides.pop(machine_key, None)
+        persist_state()
         return {"message": "Machine removed.", "machine_key": machine_key}
     if machine_key in remote_machines:
         del remote_machines[machine_key]
         machine_overrides.pop(machine_key, None)
+        persist_state()
         return {"message": "Remote machine removed.", "machine_key": machine_key}
 
     local_key = normalize_machine_id(collect_full_snapshot())
@@ -1616,6 +1688,7 @@ def create_machine_task(machine_key: str, request: TaskRequest) -> dict[str, Any
     if machine_key in {local_snapshot["machine_key"], local_snapshot["identity"].get("hostname")}:
         task = run_local_task(command)
         task_results.setdefault(task["machine_key"], []).append(task)
+        persist_state()
         return task
 
     if machine_key not in remote_machines:
@@ -1654,6 +1727,7 @@ def rename_terminal_session(session_id: str, request: TerminalSessionRename) -> 
         raise HTTPException(status_code=404, detail="Terminal session not found.")
     terminal_sessions[session_id]["name"] = request.name.strip()
     terminal_sessions[session_id]["updated_at"] = now_iso()
+    persist_state()
     return terminal_summary(terminal_sessions[session_id])
 
 
@@ -1662,6 +1736,7 @@ def delete_terminal_session(session_id: str) -> dict[str, str]:
     if session_id not in terminal_sessions:
         raise HTTPException(status_code=404, detail="Terminal session not found.")
     del terminal_sessions[session_id]
+    persist_state()
     return {"message": "Terminal session deleted.", "session_id": session_id}
 
 
@@ -1715,6 +1790,7 @@ def receive_agent_task_result(
     else:
         history.append(completed)
 
+    persist_state()
     return {"message": "Task result received.", "task_id": task_id}
 
 

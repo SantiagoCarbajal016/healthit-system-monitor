@@ -151,8 +151,7 @@ function renderDeploySteps(steps = [], failed = false) {
         const step = byLabel.get(label);
         const status = step?.status || "pending";
         const className = status === "failed" ? "failed" : status === "completed" ? "completed" : "";
-        const marker = status === "failed" ? "x" : status === "completed" ? "check" : "dot";
-        return `<li class="${className}"><span>${marker}</span>${escapeHtml(label)}</li>`;
+        return `<li class="${className}"><span aria-hidden="true"></span>${escapeHtml(label)}</li>`;
     }).join("");
 
     const done = steps.filter((step) => step.status === "completed").length;
@@ -191,7 +190,7 @@ function deploySummary(result) {
         result.target ? `SSH target: ${result.target}` : null,
         result.login_type ? `Login type: SSH ${result.login_type}` : null,
         "",
-        ...(result.steps || []).map((step) => `${step.status === "failed" ? "x" : "check"} ${step.label}`),
+        ...(result.steps || []).map((step) => `${step.status === "failed" ? "failed" : "done"} - ${step.label}`),
     ].filter((line) => line !== null);
     return lines.join("\n");
 }

@@ -255,14 +255,13 @@ textarea:focus {
 }
 
 .deploy-step-list span {
-    display: inline-grid;
-    place-items: center;
-    width: 18px;
-    height: 18px;
+    display: inline-block;
+    flex: 0 0 auto;
+    width: 8px;
+    height: 8px;
     border: 1px solid var(--border);
     border-radius: 50%;
-    color: var(--faint);
-    font-size: 0.62rem;
+    background: #2b323d;
 }
 
 .deploy-step-list li.completed {
@@ -271,7 +270,7 @@ textarea:focus {
 
 .deploy-step-list li.completed span {
     border-color: rgba(115, 191, 105, 0.55);
-    color: var(--green);
+    background: var(--green);
 }
 
 .deploy-step-list li.failed {
@@ -280,7 +279,7 @@ textarea:focus {
 
 .deploy-step-list li.failed span {
     border-color: rgba(242, 73, 92, 0.6);
-    color: var(--red);
+    background: var(--red);
 }
 
 .deploy-details {

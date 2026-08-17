@@ -27,6 +27,8 @@ ALLOWED_TASKS = {
     "memory",
     "network",
     "alerts",
+    "healthit",
+    "whatisthis",
 }
 
 
@@ -204,6 +206,11 @@ def task_output(command: str, current: dict[str, Any]) -> tuple[str, str]:
 
     if command == "help":
         return "completed", "Allowed commands: " + ", ".join(sorted(ALLOWED_TASKS))
+    if command in {"healthit", "whatisthis"}:
+        return (
+            "completed",
+            "Hi, I am your HealthIT networking dashboard. Tiny control room, big machine energy.",
+        )
     if command in {"status", "refresh"}:
         return (
             "completed",

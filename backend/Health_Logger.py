@@ -171,6 +171,8 @@ ALLOWED_TASKS = {
     "memory",
     "network",
     "alerts",
+    "healthit",
+    "whatisthis",
 }
 
 
@@ -1199,6 +1201,11 @@ def format_task_output(command: str, snapshot: dict[str, Any]) -> str:
 
     if command == "help":
         return "Allowed commands: " + ", ".join(sorted(ALLOWED_TASKS))
+    if command in {"healthit", "whatisthis"}:
+        return (
+            "Hi, I am your HealthIT networking dashboard. "
+            "Tiny control room, big machine energy."
+        )
     if command in {"status", "refresh"}:
         return (
             f"{snapshot.get('display_name') or identity.get('hostname', 'Machine')} is "
@@ -1440,7 +1447,10 @@ def run_terminal_command(session_id: str, command: str) -> dict[str, Any]:
         persist_state()
         return terminal_summary(session)
 
-    if clean_command.lower() in {"pwd", "cd"}:
+    if clean_command.lower() in {"healthit", "whatisthis"}:
+        output = "Hi, I am your HealthIT networking dashboard. Tiny control room, big machine energy."
+        exit_code = 0
+    elif clean_command.lower() in {"pwd", "cd"}:
         output = session["cwd"]
         exit_code = 0
     elif clean_command.lower().startswith("cd "):

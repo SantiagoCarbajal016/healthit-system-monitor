@@ -9,6 +9,7 @@ from backend.Health_Logger import (
     app,
     deploy_failure,
     deploy_step,
+    format_task_output,
     machine_overrides,
     registered_machines,
     remote_machines,
@@ -107,3 +108,10 @@ def test_deploy_failure_has_a_human_message_and_failed_step():
     assert error.detail["message"] == "Installing dependencies failed."
     assert error.detail["step"]["status"] == "failed"
     assert "internet access" in error.detail["hint"]
+
+
+def test_healthit_terminal_signature_command():
+    output = format_task_output("healthit", {"identity": {}, "alerts": []})
+
+    assert "HealthIT networking dashboard" in output
+    assert "Tiny control room" in output

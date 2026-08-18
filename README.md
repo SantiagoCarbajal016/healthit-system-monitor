@@ -4,6 +4,24 @@ A simple homelab dashboard for watching computers on your network.
 
 HealthIT Monitor lets you run a dashboard on one computer, connect other machines to it, and see their system stats in one place. It is meant for Raspberry Pis, laptops, servers, repair machines, or any small lab setup where you want a quick view of what is happening.
 
+## Preview
+
+### Dashboard Overview
+
+![HealthIT dashboard overview](screenshots/Dashboard_wideview.png)
+
+### Agent Deploy Flow
+
+![HealthIT agent deployment progress](screenshots/agent_connection.png)
+
+### Local Terminal
+
+![HealthIT local terminal](screenshots/terminal_overview.png)
+
+### System Details
+
+![HealthIT technical system panels](screenshots/technical_overview_terminal.png)
+
 ## What It Does
 
 - Shows CPU, memory, disk, network, uptime, hardware, users, power, and process info.
@@ -106,3 +124,7 @@ python -m pytest
 - Do not expose it directly to the public internet yet.
 - SSH passwords are not stored.
 - SSH keys are recommended for long-term use.
+
+## License
+
+MIT

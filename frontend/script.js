@@ -1,4 +1,4 @@
-const API_BASE = window.location.protocol.startsWith("http") ? window.location.origin : "http://127.0.0.1:8000";
+const { apiBase: API_BASE, apiFetch } = window.HealthITApi;
 
 // One shared state object keeps the dashboard simple while this is still vanilla JS.
 const state = {
@@ -197,7 +197,7 @@ function deploySummary(result) {
 
 async function loadDeployInfo() {
     try {
-        const response = await fetch(`${API_BASE}/deploy-info`);
+        const response = await apiFetch("/deploy-info");
         if (!response.ok) return;
         const data = await response.json();
         if (!els.newMachineControllerUrl.value) els.newMachineControllerUrl.value = data.controller_url || "";
@@ -477,7 +477,7 @@ async function editMachine(machine) {
     const tagsValue = window.prompt("Tags, comma separated", (machine.tags || []).join(", "));
     const tags = (tagsValue || "").split(",").map((tag) => tag.trim()).filter(Boolean);
 
-    const response = await fetch(`${API_BASE}/machines/${encodeURIComponent(key)}`, {
+    const response = await apiFetch(`/machines/${encodeURIComponent(key)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ display_name: name.trim(), host: host?.trim() || null, tags }),
@@ -497,7 +497,7 @@ async function deleteMachine(machine) {
         return;
     }
     if (!window.confirm(`Remove "${machineName(machine)}" from inventory?`)) return;
-    const response = await fetch(`${API_BASE}/machines/${encodeURIComponent(key)}`, { method: "DELETE" });
+    const response = await apiFetch(`/machines/${encodeURIComponent(key)}`, { method: "DELETE" });
     if (!response.ok) {
         showToast("Could not remove machine.", "error");
         return;
@@ -710,7 +710,7 @@ function syncMaskButton() {
 }
 
 async function fetchMachines() {
-    const response = await fetch(`${API_BASE}/machines`);
+    const response = await apiFetch("/machines");
     if (!response.ok) throw new Error(`API returned ${response.status}`);
     const data = await response.json();
     state.machines = data.machines || [];
@@ -747,7 +747,7 @@ async function registerMachine(event) {
                 host: null,
                 tags,
             };
-        const response = await fetch(`${API_BASE}${endpoint}`, {
+        const response = await apiFetch(endpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body),
@@ -1193,7 +1193,7 @@ function ensureVisible(sessionId) {
 }
 
 async function loadTerminalSessions() {
-    const response = await fetch(`${API_BASE}/terminal/sessions`);
+    const response = await apiFetch("/terminal/sessions");
     if (!response.ok) throw new Error("Could not load terminal sessions.");
     const data = await response.json();
     state.terminalSessions = data.sessions || [];
@@ -1203,7 +1203,7 @@ async function loadTerminalSessions() {
 }
 
 async function createTerminalSession() {
-    const response = await fetch(`${API_BASE}/terminal/sessions`, {
+    const response = await apiFetch("/terminal/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: `session-${state.terminalSessions.length + 1}`, machine_key: state.selectedKey }),
@@ -1221,7 +1221,7 @@ async function renameTerminalSession(sessionId = state.activeTerminalId) {
     if (!session) return;
     const nextName = window.prompt("Terminal name", session.name);
     if (!nextName || !nextName.trim()) return;
-    const response = await fetch(`${API_BASE}/terminal/sessions/${encodeURIComponent(sessionId)}/rename`, {
+    const response = await apiFetch(`/terminal/sessions/${encodeURIComponent(sessionId)}/rename`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: nextName.trim() }),
@@ -1236,7 +1236,7 @@ async function renameTerminalSession(sessionId = state.activeTerminalId) {
 async function deleteTerminalSession(sessionId = state.activeTerminalId) {
     const session = state.terminalSessions.find((item) => item.session_id === sessionId);
     if (!session || !window.confirm(`Delete terminal "${session.name}"?`)) return;
-    const response = await fetch(`${API_BASE}/terminal/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+    const response = await apiFetch(`/terminal/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
     if (!response.ok) return;
     state.terminalSessions = state.terminalSessions.filter((item) => item.session_id !== sessionId);
     state.visibleTerminalIds = state.visibleTerminalIds.filter((id) => id !== sessionId);
@@ -1267,7 +1267,7 @@ async function runTerminalCommand(command) {
     if (!state.activeTerminalId) return;
     els.terminalState.textContent = "running";
     try {
-        const response = await fetch(`${API_BASE}/terminal/sessions/${encodeURIComponent(state.activeTerminalId)}/commands`, {
+        const response = await apiFetch(`/terminal/sessions/${encodeURIComponent(state.activeTerminalId)}/commands`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ command: command.trim() }),

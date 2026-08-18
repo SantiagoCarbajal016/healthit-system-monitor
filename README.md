@@ -124,3 +124,7 @@ python -m pytest
 - Do not expose it directly to the public internet yet.
 - SSH passwords are not stored.
 - SSH keys are recommended for long-term use.
+
+## License
+
+MIT
